@@ -99,6 +99,51 @@ def process_incoming_message(sender_id: int, sender_role: str, message: str) -> 
         
     elif intent == "COMPLETION" and sender_role == "student":
         return handle_student_update(sender_id, message, is_completion=True)
+    
+    elif intent == "CHECK_STATUS" and sender_role == "teacher":
+        return handle_status_check(sender_id)
         
     else:
         return generate_conversational_reply("You are a helpful classroom assistant. Answer generally.", message)
+    
+
+def generate_proactive_reminder(student_name: str, assignment_desc: str, deadline: str) -> str:
+    context = """You are a supportive, friendly teacher's assistant. 
+Your job is to write a very short, encouraging reminder to a student about their pending work.
+Keep it casual, helpful, and under 3 sentences. Do not be scolding."""
+    
+    prompt = f"Student: {student_name}\nTask: {assignment_desc}\nDeadline: {deadline}"
+    
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": context},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Hey {student_name}, just a quick automated nudge that your task '{assignment_desc}' is still pending!"
+
+def handle_status_check(teacher_id: int) -> str:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT u.name, a.description, a.status
+        FROM assignments a
+        JOIN users u ON a.student_id = u.telegram_id
+        WHERE a.teacher_id = ? AND a.status != 'completed'
+    ''', (teacher_id,))
+    tasks = cursor.fetchall()
+    conn.close()
+
+    if not tasks:
+        return "All your students are caught up! There are no pending assignments right now."
+
+    report = "📊 **Active Student Status Report:**\n\n"
+    for task in tasks:
+        report += f"👤 {task['name']} - {task['description']} [{task['status'].upper()}]\n"
+
+    return report

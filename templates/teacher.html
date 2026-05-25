@@ -23,7 +23,7 @@
                 <tbody>
                     {% for item in assignments %}
                     <tr>
-                        <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-medium">{{ item.student_name }}</td>
+                        <td class="px-5 py-5 border-b bg-white text-sm font-medium"><a href="/student/{{ item.student_id }}" class="text-blue-600 hover:text-blue-900 underline">{{ item.student_name }}</a></td>
                         <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">{{ item.description }}</td>
                         <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">{{ item.deadline if item.deadline else 'Not set' }}</td>
                         <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
