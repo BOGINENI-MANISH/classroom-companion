@@ -1,17 +1,18 @@
+import os
+import sqlite3
+import asyncio
+import json
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
+from dotenv import load_dotenv
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 
-import sqlite3
-import os
-import asyncio
-from dotenv import load_dotenv
-
-from agents import process_incoming_message 
+from agents import process_incoming_message, generate_proactive_reminder
 
 load_dotenv()
 
@@ -21,6 +22,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 templates = Jinja2Templates(directory="templates")
 
 def get_db_connection():
+    # Utilizing SQLite to guarantee zero running costs for this student project
     conn = sqlite3.connect("classroom.db")
     conn.row_factory = sqlite3.Row
     return conn
@@ -30,26 +32,30 @@ ptb_app = Application.builder().token(TOKEN).build()
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    name = update.message.from_user.first_name
     args = context.args 
     
     conn = get_db_connection()
     cursor = conn.cursor()
 
     if args:
-        # --- STUDENT ONBOARDING VIA DEEP LINK ---
+        # --- STUDENT JOINED VIA LINK ---
         teacher_code = args[0]
         cursor.execute("SELECT name FROM users WHERE telegram_id = ? AND role = 'teacher'", (teacher_code,))
         teacher = cursor.fetchone()
         
         if teacher:
+            # Save the ID and Teacher Link, but set the name to a flag
             cursor.execute('''
                 INSERT INTO users (telegram_id, role, name, teacher_id) 
-                VALUES (?, 'student', ?, ?)
-                ON CONFLICT(telegram_id) DO UPDATE SET teacher_id=excluded.teacher_id, role='student'
-            ''', (user_id, name, teacher_code))
+                VALUES (?, 'student', 'PENDING_NAME', ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET teacher_id=excluded.teacher_id, name='PENDING_NAME', role='student'
+            ''', (user_id, teacher_code))
             conn.commit()
-            await update.message.reply_text(f"Success! 🎒 You are linked to Teacher {teacher['name']}.")
+            
+            await update.message.reply_text(
+                f"Welcome! 👋 You have successfully connected to Teacher *{teacher['name']}*.\n\n"
+                "To finish your registration, please type your **Full Official Name** below so your teacher can recognize you:"
+            )
         else:
             await update.message.reply_text("Invalid invite code. Please ask your teacher for the correct link.")
     else:
@@ -61,6 +67,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
+        name = update.message.from_user.first_name
         await update.message.reply_text(
             f"Welcome to Classroom Companion, {name}! How would you like to use this bot?", 
             reply_markup=reply_markup
@@ -86,7 +93,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         
         bot_username = (await context.bot.get_me()).username
-        invite_link = f"https://t.me/{bot_username}?start={user_id}"
+        invite_link = f"[https://t.me/](https://t.me/){bot_username}?start={user_id}"
         
         await query.edit_message_text(
             f"Welcome, Teacher {name}! 🎓\n\nTo onboard your students, send them this magic link:\n{invite_link}"
@@ -97,44 +104,83 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎒 To register as a student, please ask your teacher for their specific Invite Link and click it!"
         )
 
-# Make sure to register the callback handler down where your other handlers are:
-# ptb_app.add_handler(CallbackQueryHandler(button_callback))
-    else:
-        # --- TEACHER ONBOARDING ---
-        # Register the teacher (if they don't already exist)
+async def handle_file_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # 1. Identify the student and their linked teacher
+    cursor.execute("SELECT name, teacher_id FROM users WHERE telegram_id = ? AND role = 'student'", (user_id,))
+    student = cursor.fetchone()
+    
+    if not student:
+        await update.message.reply_text("Only registered students can submit files.")
+        conn.close()
+        return
+
+    # 2. Find their most recent pending/in-progress assignment
+    cursor.execute('''
+        SELECT id, description FROM assignments 
+        WHERE student_id = ? AND status != 'completed' 
+        ORDER BY id DESC LIMIT 1
+    ''', (user_id,))
+    task = cursor.fetchone()
+
+    if task:
+        # Mark as completed
+        cursor.execute("UPDATE assignments SET status = 'completed' WHERE id = ?", (task['id'],))
+        
+        # Log the submission
         cursor.execute('''
-            INSERT INTO users (telegram_id, role, name) 
-            VALUES (?, 'teacher', ?)
-            ON CONFLICT(telegram_id) DO NOTHING
-        ''', (user_id, name))
+            INSERT INTO interactions (assignment_id, sender_id, message_text)
+            VALUES (?, ?, ?)
+        ''', (task['id'], user_id, "Student submitted a file/photo."))
         conn.commit()
-        
-        # Generate the magic invite link
-        bot_username = (await context.bot.get_me()).username
-        invite_link = f"https://t.me/{bot_username}?start={user_id}"
-        
-        await update.message.reply_text(
-            f"Welcome, Teacher {name}! 🎓\n\n"
-            f"To onboard your students, simply send them this magic link:\n"
-            f"{invite_link}\n\n"
-            f"Once they click it, they will be instantly linked to your classroom."
+
+        # 3. Forward the exact file to the Teacher
+        teacher_id = student['teacher_id']
+        await context.bot.send_message(
+            chat_id=teacher_id, 
+            text=f"📥 **New Submission from {student['name']}!**\nTask: {task['description']}\n\nPlease review the attached file and reply with feedback (e.g., 'Tell {student['name']} great job but fix the intro').",
+            parse_mode="Markdown"
         )
+        
+        # Forward the actual document or photo
+        if update.message.document:
+            await context.bot.send_document(chat_id=teacher_id, document=update.message.document.file_id)
+        elif update.message.photo:
+            await context.bot.send_photo(chat_id=teacher_id, photo=update.message.photo[-1].file_id)
+
+        await update.message.reply_text("🎉 Submission received! I have forwarded your file to your teacher.")
+    else:
+        await update.message.reply_text("You don't have any active assignments to submit right now.")
         
     conn.close()
 
 async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    text = update.message.text
-    
-    # Edge Case: Handle non-text messages (images, stickers) gracefully
-    if not text:
-        await update.message.reply_text("I only understand text messages right now! Please type out your request.")
-        return
+    incoming_text = update.message.text.strip()
     
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT role FROM users WHERE telegram_id = ?", (user_id,))
+    
+    # Check if this user exists and is currently setting up their name
+    cursor.execute("SELECT name, role FROM users WHERE telegram_id = ?", (user_id,))
     user = cursor.fetchone()
+    
+    if user and user['name'] == 'PENDING_NAME':
+        # The text they sent IS their actual name! Let's update it.
+        cursor.execute("UPDATE users SET name = ? WHERE telegram_id = ?", (incoming_text, user_id))
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text(
+            f"Registration complete! 🎉 I've registered you as **{incoming_text}**.\n"
+            "Your teacher can now assign you tasks directly through me. Stay tuned!"
+        )
+        return # STOP here so this text doesn't accidentally get processed by the AI Router!
+
     conn.close()
 
     if not user:
@@ -144,11 +190,43 @@ async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_
     role = user['role']
     await context.bot.send_chat_action(chat_id=user_id, action='typing')
     
-    # Run AI logic asynchronously
-    reply = await asyncio.to_thread(process_incoming_message, user_id, role, text)
+    # ============================================================
+    # 🛠️ UPDATED AI ROUTING LOGIC 
+    # ============================================================
+    try:
+        from llm_routing import classify_intent  
+        llm_output_string = classify_intent(role, incoming_text)
+        
+        # Strip out Markdown backticks in case Llama 3 adds them
+        clean_string = llm_output_string.replace("```json", "").replace("```", "").strip()
+        
+        parsed_json = json.loads(clean_string)
+        intent = parsed_json.get("intent", "GENERAL_QUERY")
+        extracted_data = parsed_json.get("extracted_data", {})
+    except Exception as e:
+        print(f"Error parsing LLM routing: {e}")
+        intent = "GENERAL_QUERY"
+        extracted_data = {}
+    loop=asyncio.get_running_loop()
+
+    # 2. Pass all variables safely into the processing engine
+    reply = await asyncio.to_thread(
+        process_incoming_message, 
+        intent, 
+        extracted_data, 
+        user_id, 
+        role, 
+        incoming_text,
+        context.bot,
+        loop
+    )
+    
     await update.message.reply_text(reply)
 
+# Register Handlers
 ptb_app.add_handler(CommandHandler("start", start_command))
+ptb_app.add_handler(CallbackQueryHandler(button_callback)) # Added the missing button handler!
+ptb_app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, handle_file_submission))
 ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_telegram_message))
 
 # --- FASTAPI LIFECYCLE & WEBHOOK ---
@@ -195,7 +273,6 @@ async def teacher_dashboard(request: Request, teacher_id: int):
         name="teacher.html", 
         context={"request": request, "teacher_id": teacher_id, "assignments": assignments}
     )
-from agents import generate_proactive_reminder
 
 @app.get("/trigger-reminders")
 async def trigger_reminders(request: Request):
@@ -214,7 +291,6 @@ async def trigger_reminders(request: Request):
     
     reminders_sent = 0
     for task in active_tasks:
-        # Generate the friendly AI nudge
         nudge_message = await asyncio.to_thread(
             generate_proactive_reminder, 
             task['name'], 
@@ -222,7 +298,6 @@ async def trigger_reminders(request: Request):
             task['deadline']
         )
         
-        # Send it directly to the student's Telegram
         try:
             await ptb_app.bot.send_message(
                 chat_id=task['telegram_id'], 
@@ -230,7 +305,6 @@ async def trigger_reminders(request: Request):
                 parse_mode="Markdown"
             )
             
-            # Log the interaction in the database so the student/teacher can see it in the UI
             cursor.execute('''
                 INSERT INTO interactions (assignment_id, sender_id, message_text)
                 VALUES (?, ?, ?)
