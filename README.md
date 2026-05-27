@@ -128,37 +128,54 @@ Students receive a personal dashboard displaying:
 ===================================================================
   🚀 APPLICATION LAYER (FastAPI Server)
   
-                    ┌---------------------------------┐
- [Web Browser] ---> |     main.py (The Gateway)       |
- (Dashboards)       |  • FastAPI Endpoints            |
-                    |  • Telegram Webhook Receiver    |
-                    |  • Background Thread Manager    |
-                    └---------------------------------┘
-                                     |
-                                     v
-                    ┌---------------------------------┐
-                    |  llm_routing.py (The Brain)     |<---- (API Call)
-                    |  • Zero-Shot Classification     |
-                    |  • Entity Extraction            |
-                    |  • JSON Formatting Guardrails   |
-                    └---------------------------------┘
-                                     |
-                                     v
-                    ┌---------------------------------┐
-                    |     agents.py (The Muscle)      |
-                    |  • Intent Handlers              |
-                    |  • Business Logic               |
-                    |  • Async Telegram Responses     |
-                    └---------------------------------┘
-                                     |
-===================================================================
-  💾 DATA LAYER                      |
-                                     v
-                    ┌---------------------------------┐
-                    |   database.py (The Memory)      |
-                    |  • SQLite Relational DB         |
-                    |  • Users, Assignments, Logs     |
-                    └---------------------------------┘
+## 🏗️ System Architecture
+
+```mermaid
+graph TD
+    %% Define external actors
+    User[📱 Telegram Client<br>Teacher/Student]
+    Groq[⚡ Groq API<br>Llama 3]
+
+    %% Define the core application boundaries
+    subgraph "FastAPI Server Layer"
+        Main[Gateway 🚪<br>main.py]
+        Router[Semantic Router 🧠<br>llm_routing.py]
+        Agents[Logic Engine ⚙️<br>agents.py]
+        UI[Web UI 💻<br>Jinja2 Templates]
+    end
+
+    %% Define the Database
+    DB[(SQLite Database 💾<br>classroom.db)]
+
+    %% Define the flow
+    User -- "Sends Message/File" --> Main
+    User -- "Views Dashboard" --> UI
+    
+    Main -- "Raw Text + Role" --> Router
+    Router <-->|"Prompt / Strict JSON"| Groq
+    
+    Router -- "Intent + Extracted Entities" --> Agents
+    Agents <-->|"Read/Write State"| DB
+    UI <-->|"Fetch Assignments/Logs"| DB
+    
+    Agents -- "Async Reply/File Forwarding" --> User
+    
+    %% Styling
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:2px;
+    classDef highlight fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    class Main,Router,Agents highlight;
+```
+
+classroom-companion/
+├── main.py              # FastAPI server, Telegram Webhook, and Thread Management
+├── llm_routing.py       # Zero-shot intent classification via Groq/Llama 3 API
+├── agents.py            # Core business logic, async Telegram tasks, and DB queries
+├── database.py          # SQLite database schema and initialization
+├── classroom.db         # Local database (Ignored in .gitignore)
+├── .env                 # Environment variables (Tokens, Webhook URLs)
+└── templates/           # Jinja2 HTML dashboards
+    ├── teacher.html     # Web view for teachers
+    └── student.html     # Web view for students
 
 
 ## 🧠 Architectural Philosophy
