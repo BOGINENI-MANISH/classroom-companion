@@ -295,7 +295,7 @@ The system is powered by a relational SQLite schema optimized for role-based cla
 ## 1️⃣ Clone Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/classroom-companion.git
+git clone https://github.com/BOGINENI-MANISH/classroom-companion.git
 cd classroom-companion
 ```
 
