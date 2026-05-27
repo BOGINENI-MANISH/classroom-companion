@@ -115,6 +115,10 @@ Students receive a personal dashboard displaying:
 
 ---
 
+
+                    
+# 🏗️ System Architecture
+
 📱 CLIENT LAYER                         🌐 EXTERNAL APIS
   
  [Telegram App]                      [Groq / Llama-3 API]
@@ -156,8 +160,6 @@ Students receive a personal dashboard displaying:
                     |  • Users, Assignments, Logs     |
                     └---------------------------------┘
 
-                    
-# 🏗️ System Architecture
 
 ## 🧠 Architectural Philosophy
 
