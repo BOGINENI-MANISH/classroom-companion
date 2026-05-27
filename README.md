@@ -166,16 +166,7 @@ graph TD
     class Main,Router,Agents highlight;
 ```
 
-classroom-companion/
-├── main.py              # FastAPI server, Telegram Webhook, and Thread Management
-├── llm_routing.py       # Zero-shot intent classification via Groq/Llama 3 API
-├── agents.py            # Core business logic, async Telegram tasks, and DB queries
-├── database.py          # SQLite database schema and initialization
-├── classroom.db         # Local database (Ignored in .gitignore)
-├── .env                 # Environment variables (Tokens, Webhook URLs)
-└── templates/           # Jinja2 HTML dashboards
-    ├── teacher.html     # Web view for teachers
-    └── student.html     # Web view for students
+
 
 
 ## 🧠 Architectural Philosophy
