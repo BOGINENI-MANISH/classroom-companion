@@ -115,6 +115,48 @@ Students receive a personal dashboard displaying:
 
 ---
 
+📱 CLIENT LAYER                         🌐 EXTERNAL APIS
+  
+ [Telegram App]                      [Groq / Llama-3 API]
+  (Chat Interface)                           |
+        |                                    |
+        v                                    v
+===================================================================
+  🚀 APPLICATION LAYER (FastAPI Server)
+  
+                    ┌---------------------------------┐
+ [Web Browser] ---> |     main.py (The Gateway)       |
+ (Dashboards)       |  • FastAPI Endpoints            |
+                    |  • Telegram Webhook Receiver    |
+                    |  • Background Thread Manager    |
+                    └---------------------------------┘
+                                     |
+                                     v
+                    ┌---------------------------------┐
+                    |  llm_routing.py (The Brain)     |<---- (API Call)
+                    |  • Zero-Shot Classification     |
+                    |  • Entity Extraction            |
+                    |  • JSON Formatting Guardrails   |
+                    └---------------------------------┘
+                                     |
+                                     v
+                    ┌---------------------------------┐
+                    |     agents.py (The Muscle)      |
+                    |  • Intent Handlers              |
+                    |  • Business Logic               |
+                    |  • Async Telegram Responses     |
+                    └---------------------------------┘
+                                     |
+===================================================================
+  💾 DATA LAYER                      |
+                                     v
+                    ┌---------------------------------┐
+                    |   database.py (The Memory)      |
+                    |  • SQLite Relational DB         |
+                    |  • Users, Assignments, Logs     |
+                    └---------------------------------┘
+
+                    
 # 🏗️ System Architecture
 
 ## 🧠 Architectural Philosophy
